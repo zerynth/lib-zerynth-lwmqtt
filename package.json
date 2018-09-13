@@ -1,0 +1,20 @@
+{
+    "dependencies": {},
+    "description": "MQTT protocol support via a lightweight C-based client",
+    "fullname": "lib.zerynth.lwmqtt",
+    "git_pointer": "zerynth://zerynth-libs/zerynth-lwmqtt",
+    "info": {
+        "chip_manufacturer": "-",
+        "chip_name": "-",
+        "name": "Zerynth Lightweight MQTT Library",
+        "type": "Protocol"
+    },
+    "keywords": [
+        "mqtt",
+        "lightweight"
+    ],
+    "repo": "official",
+    "title": "Lightweight MQTT Library",
+    "version": "r2.1.2",
+    "whatsnew": ""
+}
