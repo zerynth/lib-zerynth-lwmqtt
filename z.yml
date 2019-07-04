@@ -1,0 +1,13 @@
+---
+description: MQTT protocol support via a lightweight C-based client
+fullname: lib.zerynth.lwmqtt
+info:
+    chip_manufacturer: '-'
+    chip_name: '-'
+    name: Zerynth Lightweight MQTT Library
+    type: Protocol
+keywords:
+- mqtt
+- lightweight
+title: Lightweight MQTT Library
+...
