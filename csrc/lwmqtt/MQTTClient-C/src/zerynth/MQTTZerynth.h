@@ -17,7 +17,7 @@
 #if !defined(MQTTZerynth_H)
 #define MQTTZerynth_H
 
-#define ZERYNTH_PRINTF
+// #define ZERYNTH_PRINTF
 #include "zerynth.h"
 
 #define ZERYNTH_SOCKETS
@@ -27,7 +27,7 @@
 
 typedef struct Timer 
 {
-	uint32_t start_millis;
+	uint64_t start_millis;
 	uint32_t millis_to_wait;
 } Timer;
 

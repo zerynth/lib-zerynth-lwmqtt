@@ -57,7 +57,7 @@ int MutexUnlock(Mutex* mutex)
 void TimerCountdownMS(Timer* timer, unsigned int timeout_ms)
 {
 	timer->millis_to_wait = timeout_ms;
-	timer->start_millis   = _systime_millis;
+	timer->start_millis   = vosMillis();
 }
 
 
@@ -69,7 +69,7 @@ void TimerCountdown(Timer* timer, unsigned int timeout)
 
 int TimerLeftMS(Timer* timer) 
 {
-	uint32_t delta_t = _systime_millis - timer->start_millis;
+	uint32_t delta_t = (uint32_t)(vosMillis() - timer->start_millis);
 	if (delta_t > timer->millis_to_wait) return 0;
 	return timer->millis_to_wait - delta_t;
 }
@@ -79,7 +79,7 @@ char TimerIsExpired(Timer* timer)
 {
     if (timer->millis_to_wait == 0) return 0; // not expired if not started
 
-	uint32_t delta_t = _systime_millis - timer->start_millis;
+	uint32_t delta_t = (uint32_t)(vosMillis() - timer->start_millis);
 	if (delta_t > timer->millis_to_wait) return 1;
 	return 0;
 }
@@ -104,7 +104,15 @@ int Zerynth_read(Network* n, unsigned char* buffer, int len, int timeout_ms)
     RELEASE_GIL();
 
     FD_ZERO( &read_fds );
-    FD_SET(n->my_socket, &read_fds );
+    if (n->my_socket < FD_SETSIZE) {
+        // FD_SET only for allowed sock_ids ( < FD_SETSIZE)
+        // if the id is not valid, the zsock_select is implemented in a custom way to 
+        // handle such ids 
+        // (e.g. for esp32net TLS sockets with id > 300, select is not available, but
+        // is implemented checking if data is available to read for only one socket whose id is derived
+        // from maxfdp1)
+        FD_SET(n->my_socket, &read_fds );
+    }
 
     rc = zsock_select(n->my_socket + 1, &read_fds, NULL, NULL, timeout_ms == 0 ? NULL : &tv );
 
@@ -147,7 +155,7 @@ int Zerynth_read(Network* n, unsigned char* buffer, int len, int timeout_ms)
 int Zerynth_write(Network* n, unsigned char* buffer, int len, int timeout_ms)
 {
 	int sentLen = 0;
-	uint32_t start_millis = _systime_millis;
+	uint64_t start_millis = vosMillis();//_systime_millis;
 
     RELEASE_GIL();
     do
@@ -163,7 +171,7 @@ int Zerynth_write(Network* n, unsigned char* buffer, int len, int timeout_ms)
             sentLen = rc;
             break;
         }
-    } while (sentLen < len && (_systime_millis - start_millis) < timeout_ms);
+    } while (sentLen < len && ((vosMillis() - start_millis) < timeout_ms));
     ACQUIRE_GIL();
 
 
