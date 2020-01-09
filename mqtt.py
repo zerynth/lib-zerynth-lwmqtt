@@ -25,6 +25,14 @@ PORT = 1883
 BREAK_LOOP = 0
 RECOVERED = 1
 
+# connect return codes
+RC_ACCEPTED = 0             # Connection accepted
+RC_REFUSED_VERSION = 1      # Connection refused, unacceptable protocol version
+RC_REFUSED_IDENTIFIER = 2   # Connection refused, identifier rejected
+RC_REFUSED_SERVER = 3       # Connection refused, server unavailable
+RC_REFUSED_BADUSRPWD = 4    # Connection refused, bad user name or password
+RC_REFUSED_NOAUTH = 5       # Connection refused, not authorized
+
 @native_c("_mqtt_init", 
     [
         "csrc/lwmqtt_ifc.c",
@@ -46,7 +54,7 @@ RECOVERED = 1
         "-I#csrc/zsockets"
     ]
 )
-def _mqtt_init(activated_cbks, client_id, clean_session,select_loop_time):
+def _mqtt_init(activated_cbks, client_id, clean_session, select_loop_time, command_timeout):
     pass
 
 @native_c("_mqtt_connect", [])
@@ -95,24 +103,28 @@ def _mqtt_topic_match(topic,gen_topic):
 
 class Client:
 
-    def __init__(self, client_id, clean_session=True,select_loop_time=500):
+    def __init__(self, client_id, clean_session=True, cycle_timeout=500, command_timeout=60000):
         """
 ============
 Client class
 ============
 
-.. class:: Client(client_id, clean_session=True)
+.. class:: Client(client_id, clean_session=True, cycle_timeout=500, command_timeout=60000)
 
     :param client_id: unique ID of the MQTT Client (multiple clients connecting to the same broken with the same ID are not allowed), can be an empty string with :samp:`clean_session` set to true.
-    :param clent_session: when ``True`` lets the broken assign a clean state to connecting client without remembering previous subscriptions or other configurations.
+    :param clean_session: when ``True`` requests the broker to assign a clean state to connecting client without remembering previous subscriptions or other configurations.
+    :param cycle_timeout: maximum time to wait for received messages on every loop cycle (in milliseconds)
+    :param command_timeout: maximum time to wait for protocol commands to be acknowledged (in milliseconds)
 
     Instantiates the MQTT Client.
 
         """
         self._activated_cbks = [None]*10
         self._cbks = {}
+        self._disconnected = True   # if disconnect() has been requested
+        self._loop_started = False  # if loop() is running
 
-        _mqtt_init(self._activated_cbks, client_id, clean_session, select_loop_time)
+        _mqtt_init(self._activated_cbks, client_id, clean_session, cycle_timeout, command_timeout)
 
     def connect(self, host, keepalive, port=PORT, ssl_ctx=None, sock_keepalive=None, breconnect_cb=None, aconnect_cb=None, loop_failure=None, start_loop=True):
         """
@@ -137,7 +149,7 @@ Client class
 
         """
         # to allow defining custom connects for clients inheriting from this one
-        self._connect(host, keepalive, port=port, ssl_ctx=ssl_ctx, sock_keepalive=sock_keepalive, breconnect_cb=breconnect_cb, aconnect_cb=aconnect_cb, loop_failure=loop_failure, start_loop=start_loop)
+        return self._connect(host, keepalive, port=port, ssl_ctx=ssl_ctx, sock_keepalive=sock_keepalive, breconnect_cb=breconnect_cb, aconnect_cb=aconnect_cb, loop_failure=loop_failure, start_loop=start_loop)
 
     def _connect(self, host, keepalive, port=PORT, ssl_ctx=None, sock_keepalive=None, breconnect_cb=None, aconnect_cb=None, loop_failure=None, start_loop=True):
         self._after_connect  = aconnect_cb
@@ -149,13 +161,15 @@ Client class
         self._port = port
         self._ssl_ctx = ssl_ctx
         self._sock_keepalive = sock_keepalive
-        self._disconnected = False
 
-        self._ll_connect()
-        self._loop_started=False
+        rc = self._ll_connect()
+        if _mqtt_connected():
+            self._disconnected = False
 
         if start_loop:
             self.loop()
+
+        return rc
 
     def _ll_connect(self):
         ip = __default_net["sock"][0].gethostbyname(self._host)
@@ -195,19 +209,33 @@ Client class
                 pass
 
         self._sock.connect((ip, self._port))
+        exc = None
         try:
-            _mqtt_connect(self._sock.channel, self._keepalive)
-            self._disconnected = False
+            self._return_code = _mqtt_connect(self._sock.channel, self._keepalive)
+            if self._return_code == RC_ACCEPTED:
+                self._disconnected = False
         except Exception as e:
             #close the socket, ignoring exc
-            try:
-                self._sock.close()
-            except:
-                pass
-            raise e
+            self._disconnected = True
+            exc = e
+        
+        if not _mqtt_connected():
+            self._close()
+        if exc is not None:
+            raise exc
 
-        if self._after_connect is not None:
+        if _mqtt_connected() and self._after_connect is not None:
             self._after_connect(self)
+
+        return self._return_code        
+
+    def get_return_code(self):
+        """
+.. method:: get_return_code()
+
+    Get the return code of the last connection attempt.
+        """
+        return self._return_code
 
     def reconnect(self):
         """
@@ -216,12 +244,19 @@ Client class
     Tries to connect again with previously set connection parameters.
 
     If ``breconnect_cb`` was passed to :meth:`connect`, ``breconnect_cb`` is executed first.
+
+    Return the return code of the connection
         """
         if self._before_reconnect:
             self._before_reconnect(self)
 
-        self._sock.close()
-        self._ll_connect()
+        try:
+            _mqtt_disconnect()
+        except Exception as e:
+            pass
+
+        self._close()
+        return self._ll_connect()
 
     def connected(self):
         """
@@ -297,46 +332,61 @@ Client class
 
     Unsubscribes the client from one topic.
 
-    * *topic* is the string representing the subscribed topic to unsubscribe from.
+    :param topic: is the string representing the subscribed topic to unsubscribe from.
         """
         _mqtt_unsubscribe(topic)
         self._cbks[topic] = None
 
     def disconnect(self,timeout=None):
         """
-.. method:: reconnect()
+.. method:: disconnect(timeout=None)
 
-    Sends a disconnect message.
+    Sends a disconnect message, optionally waiting for the loop to exit.
+
+    :param timeout: is the maximum time to wait (in milliseconds).
         """
-        _mqtt_disconnect()
         self._disconnected = True
-        if timeout:
-            sleep(timeout)
-        else:
-            while self._loop_started:
-                sleep(500)
+        exc = None
+        try:
+            _mqtt_disconnect()
+        except Exception as e:
+            exc = e
+        while self._loop_started:
+            sleep(100)
+            if timeout is not None:
+                timeout -= 100
+                if timeout <= 0:
+                    break
+        self._close()
+        self._loop_started = False
+        if timeout <= 0:
+            raise TimeoutError
+        if exc:
+            raise exc
 
 
-    def close(self):
-        self._sock.close()
+    def _close(self):
+        try:
+            self._sock.close()
+        except:
+            pass
 
     def _loop(self):
-        while True:
+        while self._loop_started:
             try:
                 _mqtt_cycle()
-            except IOError as eio:
-                print(eio)
+            except Exception as e:
+                print("lwmqtt loop",e)
+                # if disconnect() requested, exit now
+                if self._disconnected:
+                    break
                 # user handles cycle failure
                 rc = BREAK_LOOP
-                if self._loop_failure and not self._disconnected:
+                if self._loop_failure:
                     rc = self._loop_failure(self)
                 if rc == BREAK_LOOP:
-                    self._loop_started = False
                     break
-            except Exception as e:
-                print(e)
-                self._loop_started = False
-                break
+                print("lwmqtt loop recovered")
 
             _mqtt_activated_cbks_acquire()
             for i, activated_topic_payload in enumerate(self._activated_cbks):
@@ -348,7 +398,7 @@ Client class
                     for tpx, cb in self._cbks.items():
                         # print("comparing to",tpx,_mqtt_topic_match(topic,tpx))
                         if _mqtt_topic_match(topic,tpx):
-                            print(activated_topic_payload[1])
+                            # print(activated_topic_payload[1])
                             cb(self,activated_topic_payload[1],topic)
                 except Exception as e:
                     # print(e)
@@ -357,6 +407,7 @@ Client class
                     raise e
                 self._activated_cbks[i] = None
             _mqtt_activated_cbks_release()
+        self._loop_started = False
 
 ## Some topic match tests
 # _mqtt_topic_match("aaa/bbb/ccc","aaa/bbb/#")

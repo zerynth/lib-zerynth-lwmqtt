@@ -9,6 +9,7 @@
 #include "zerynth.h"
 #include "MQTTClient.h"
 
+//#define printf(...) vbl_printf_stdout(__VA_ARGS__)
 
 unsigned char mqtt_sendbuf[2048], mqtt_readbuf[2048];
 uint8_t *mqtt_client_username, *mqtt_client_password, *mqtt_clientid; 
@@ -35,7 +36,7 @@ C_NATIVE(_mqtt_init) {
 
     uint8_t *clientid;
     uint32_t clientid_len, i;
-    int cleansession;
+    int32_t cleansession, command_timeout;
 
     activated_callbacks = args[0];
     nargs--;
@@ -43,7 +44,7 @@ C_NATIVE(_mqtt_init) {
 
     MutexInit(&activated_callbacks_mutex);
 
-    if (parse_py_args("sii", nargs, args, &clientid, &clientid_len, &cleansession,&select_loop_time) != 3)
+    if (parse_py_args("siii", nargs, args, &clientid, &clientid_len, &cleansession, &select_loop_time, &command_timeout) != 4)
         return ERR_TYPE_EXC;
 
 
@@ -52,8 +53,8 @@ C_NATIVE(_mqtt_init) {
     }
 
     NetworkInit(&mqtt_network);
-    MQTTClientInit(&paho_mqtt_client, &mqtt_network, 30000, mqtt_sendbuf, sizeof(mqtt_sendbuf), 
-                                                            mqtt_readbuf, sizeof(mqtt_readbuf));
+    MQTTClientInit(&paho_mqtt_client, &mqtt_network, command_timeout,
+                    mqtt_sendbuf, sizeof(mqtt_sendbuf), mqtt_readbuf, sizeof(mqtt_readbuf));
 
     TimerInit(&cycle_timer);
 
@@ -68,6 +69,15 @@ C_NATIVE(_mqtt_init) {
 }
 
 
+static void clean_session(void) {
+    int32_t i;
+    for (i = 0; i < MAX_MESSAGE_HANDLERS; i++) {
+        if (subscribed_topics_cstrings[i] != NULL) {
+            gc_free(subscribed_topics_cstrings[i]);
+            subscribed_topics_cstrings[i] = NULL;
+        }
+    }
+}
 
 C_NATIVE(_mqtt_set_username_pw) {
 
@@ -95,16 +105,24 @@ C_NATIVE(_mqtt_set_username_pw) {
 C_NATIVE(_mqtt_connect) {
     NATIVE_UNWARN();
 
-    if (parse_py_args("ii", nargs, args, &mqtt_network.my_socket, &mqtt_connectData.keepAliveInterval) != 2)
+    int32_t socket, keepalive;
+
+    if (parse_py_args("ii", nargs, args, &socket, &keepalive) != 2)
         return ERR_TYPE_EXC;
+    mqtt_network.my_socket = socket;
+    mqtt_connectData.keepAliveInterval = keepalive;
 
     mqtt_connectData.MQTTVersion = 4;
 
-    if (MQTTConnect(&paho_mqtt_client, &mqtt_connectData) < 0) {
+    int rc = MQTTConnect(&paho_mqtt_client, &mqtt_connectData);
+    if (rc < 0){
+        *res = MAKE_NONE();
         return ERR_IOERROR_EXC;
     }
- 
-    *res = MAKE_NONE();
+    *res = PSMALLINT_NEW(rc);
+    // make sure we start with clean session data, if so requested
+    if (paho_mqtt_client.cleansession)
+        clean_session();
     return ERR_OK;
 }
 
@@ -135,6 +153,7 @@ C_NATIVE(_mqtt_publish) {
     cstring_topic[topic_len] = 0;
 
     if (MQTTPublish(&paho_mqtt_client, cstring_topic, &message) != 0){
+    	gc_free(cstring_topic);
         return ERR_IOERROR_EXC;
     }
 
@@ -152,7 +171,7 @@ C_NATIVE(_mqtt_cycle) {
     packet_handled = cycle(&paho_mqtt_client, &cycle_timer);
     MutexUnlock(&paho_mqtt_client.mutex);
 
-    if (packet_handled < 0) {
+    if (packet_handled < 0 || !paho_mqtt_client.isconnected) {
         // cycle returns packet_type or error code < 0
         return ERR_IOERROR_EXC;
     }
@@ -160,7 +179,7 @@ C_NATIVE(_mqtt_cycle) {
     return ERR_OK;
 }
 
-void messages_handler(MessageData* data) {
+static void messages_handler(MessageData* data) {
     uint32_t i;
 
     MutexLock(&activated_callbacks_mutex);
@@ -209,7 +228,7 @@ C_NATIVE(_mqtt_subscribe) {
         return ERR_VALUE_EXC;
     }
 
-    subscribed_topics_cstrings[free_slot] = gc_malloc(topic_len);
+    subscribed_topics_cstrings[free_slot] = gc_malloc(topic_len + 1);
     subscribed_topics_cstrings[free_slot][topic_len] = 0;
     memcpy(subscribed_topics_cstrings[free_slot], topic, topic_len);
 
@@ -257,6 +276,10 @@ C_NATIVE(_mqtt_unsubscribe) {
 C_NATIVE(_mqtt_disconnect) {
     NATIVE_UNWARN();
 
+    // make sure we release memory for session data, if clean session requested
+    if (paho_mqtt_client.cleansession)
+        clean_session();
+    
     if (MQTTDisconnect(&paho_mqtt_client) < 0) {
         return ERR_IOERROR_EXC;
     }

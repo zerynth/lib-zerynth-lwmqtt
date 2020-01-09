@@ -123,6 +123,11 @@ int Zerynth_read(Network* n, unsigned char* buffer, int len, int timeout_ms)
     }
 
     rc = zsock_recv(n->my_socket, buffer, len, 0);
+    if(rc<=0) {
+        //socket is closed! select, by definition, return 1 for a closed socket because the subsequnt read will not block (0 bytes returned)
+        //this is the condition for remotely closed socket
+        rc=ERR_CONN;
+    }
     ACQUIRE_GIL();
     return rc;
 
