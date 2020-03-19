@@ -183,28 +183,28 @@ Client class
             try:
                 self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
             except Exception as e:
-                print(e)
+                print("Ignoring socket options", e)
                 # no keepalive
                 pass
 
             try:
                 self._sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPCNT, self._sock_keepalive[0])
             except Exception as e:
-                print(e)
+                print("Ignoring socket options", e)
                 # no keepalive
                 pass
 
             try:
                 self._sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE, self._sock_keepalive[1])
             except Exception as e:
-                print(e)
+                print("Ignoring socket options", e)
                 # no keepalive
                 pass
 
             try:
                 self._sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPINTVL, self._sock_keepalive[2])
             except Exception as e:
-                print(e)
+                print("Ignoring socket options", e)
                 # no keepalive
                 pass
 
