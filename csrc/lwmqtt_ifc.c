@@ -1,8 +1,8 @@
 /*
 * @Author: lorenzo
 * @Date:   2018-08-24 11:28:19
-* @Last Modified by:   m.cipriani
-* @Last Modified time: 2019-09-13 14:40:54
+* @Last Modified by:   a.bau
+* @Last Modified time: 2020-05-09 22:16:31
 */
 
 // #define ZERYNTH_PRINTF
@@ -98,6 +98,32 @@ C_NATIVE(_mqtt_set_username_pw) {
 
     mqtt_connectData.username.cstring = mqtt_client_username;
     mqtt_connectData.password.cstring = mqtt_client_password;
+    *res = MAKE_NONE();
+    return ERR_OK;
+}
+
+C_NATIVE(_mqtt_set_will) {
+
+    uint32_t topic_len, payload_len, qos, retain;
+    uint8_t *topic, *payload;
+    
+    if (parse_py_args("ssii", nargs, args, &topic, &topic_len, &payload, &payload_len, &qos, &retain) != 4)
+        return ERR_TYPE_EXC;
+
+    uint8_t *cstring_topic = gc_malloc(topic_len + 1);
+    uint8_t *cstring_payload = gc_malloc(payload_len + 1);
+
+    cstring_topic[topic_len] = 0;
+    cstring_payload[payload_len] = 0;
+    
+    memcpy(cstring_topic, topic, topic_len);
+    memcpy(cstring_payload, payload, payload_len);
+
+    mqtt_connectData.willFlag = 1;
+    mqtt_connectData.will.topicName.cstring = cstring_topic;
+    mqtt_connectData.will.message.cstring = cstring_payload;
+    mqtt_connectData.will.retained = retain;
+    mqtt_connectData.will.qos = qos;
     *res = MAKE_NONE();
     return ERR_OK;
 }

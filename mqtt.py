@@ -65,6 +65,10 @@ def _mqtt_connect(channel, keepalive):
 def _mqtt_connected():
     pass
 
+@native_c("_mqtt_set_will", [])
+def _mqtt_set_will(topic, payload, qos, retain):
+    pass
+
 @native_c("_mqtt_set_username_pw", [])
 def _mqtt_set_username_pw(username, password):
     pass
@@ -289,6 +293,21 @@ Client class
         """
         _mqtt_set_username_pw(username, password)
 
+    def set_will(self, topic, payload, qos=0, retain=True):
+        """
+.. method:: set_will(topic, payload, qos=0, retain=True)
+
+    :param topic: last will topic.
+    :param payload: last will payload.
+    :param qos: last will qos value.
+    :param retain: last will retain flag.
+
+    Set client last will and testament.
+        """
+        _mqtt_set_will(topic,payload,qos,retain)
+
+
+
     def publish(self, topic, payload='', qos=0, retain=False):
         """
 .. method:: publish(topic, payload='', qos=0, retain=False)
@@ -359,7 +378,7 @@ Client class
                     break
         self._close()
         self._loop_started = False
-        if timeout <= 0:
+        if timeout is not None and timeout <= 0:
             raise TimeoutError
         if exc:
             raise exc
@@ -376,7 +395,7 @@ Client class
             try:
                 _mqtt_cycle()
             except Exception as e:
-                print("lwmqtt loop",e)
+                # print("lwmqtt loop",e)
                 # if disconnect() requested, exit now
                 if self._disconnected:
                     break
@@ -386,7 +405,7 @@ Client class
                     rc = self._loop_failure(self)
                 if rc == BREAK_LOOP:
                     break
-                print("lwmqtt loop recovered")
+                # print("lwmqtt loop recovered")
 
             _mqtt_activated_cbks_acquire()
             for i, activated_topic_payload in enumerate(self._activated_cbks):
