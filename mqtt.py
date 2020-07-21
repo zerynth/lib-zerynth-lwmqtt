@@ -50,6 +50,7 @@ RC_REFUSED_NOAUTH = 5       # Connection refused, not authorized
         "-I.../csrc/lwmqtt/MQTTClient-C/src/",
         "-I.../csrc/lwmqtt/MQTTClient-C/src/zerynth/",
         "-I.../csrc/lwmqtt/MQTTPacket/src",
+        "-I.../csrc",
         "-I#csrc/misc",
         "-I#csrc/zsockets"
     ]
@@ -440,7 +441,7 @@ Client class
 # _mqtt_topic_match("aaa/bbb","aaa/bbb/#")
 # _mqtt_topic_match("aaa/bbb","aaa/bbb/ddd/#")
 # _mqtt_topic_match("aaa/bbb/ccc","aaa/bbb")
-
+# _mqtt_topic_match("/aaa/bbb/ccc","/aaa/bbb/ccc")
 
 
 

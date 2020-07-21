@@ -16,9 +16,11 @@
  *   Ian Craggs - add ability to set message handler separately #6
  *******************************************************************************/
 #include "MQTTClient.h"
+#include "lwmqtt_debug.h"
 
 #include <stdio.h>
 #include <string.h>
+
 
 static void NewMessageData(MessageData* md, MQTTString* aTopicName, MQTTMessage* aMessage) {
     md->topicName = aTopicName;
@@ -116,9 +118,12 @@ static int readPacket(MQTTClient* c, Timer* timer)
     int rem_len = 0;
 
     /* 1. read the header byte.  This has the packet type in it */
+    DEBUG0("Reading packet","");
     int rc = c->ipstack->mqttread(c->ipstack, c->readbuf, 1, TimerLeftMS(timer));
-    if (rc != 1)
+    if (rc != 1){
+        ERROR("bad read %i",rc);
         goto exit;
+    }
 
     len = 1;
     /* 2. read the remaining length.  This is variable in itself */
@@ -128,19 +133,23 @@ static int readPacket(MQTTClient* c, Timer* timer)
     if (rem_len > (c->readbuf_size - len))
     {
         rc = BUFFER_OVERFLOW;
+        ERROR("packet too big %i",rc);
         goto exit;
     }
 
     /* 3. read the rest of the buffer using a callback to supply the rest of the data */
     if (rem_len > 0 && (rc = c->ipstack->mqttread(c->ipstack, c->readbuf + len, rem_len, TimerLeftMS(timer)) != rem_len)) {
+        DEBUG1("Read packet case 3 %i %i",rc,rem_len);
         rc = 0;
         goto exit;
     }
 
     header.byte = c->readbuf[0];
     rc = header.bits.type;
-    if (c->keepAliveInterval > 0)
+    if (c->keepAliveInterval > 0) {
+        DEBUG1("Mark keepalive for packet type %i",rc);
         TimerCountdown(&c->last_received, c->keepAliveInterval); // record the fact that we have successfully received a packet
+    }
 exit:
     return rc;
 }
@@ -266,7 +275,7 @@ int cycle(MQTTClient* c, Timer* timer)
         rc = SUCCESS;
 
     int packet_type = readPacket(c, timer);     /* read the socket, see what work is due */
-
+    DEBUG0("Packet type %i %x",packet_type,packet_type);
     switch (packet_type)
     {
         default:
@@ -332,6 +341,7 @@ int cycle(MQTTClient* c, Timer* timer)
 
     if (keepalive(c) != SUCCESS) {
         //check only keepalive FAILURE status so that previous FAILURE status can be considered as FAULT
+        ERROR("Failed keepalive","");
         rc = FAILURE;
     }
 
@@ -448,9 +458,9 @@ int MQTTConnectWithResults(MQTTClient* c, MQTTPacket_connectData* options, MQTTC
     {
         data->rc = 0;
         data->sessionPresent = 0;
-        if (MQTTDeserialize_connack(&data->sessionPresent, &data->rc, c->readbuf, c->readbuf_size) == 1)
+        if (MQTTDeserialize_connack(&data->sessionPresent, &data->rc, c->readbuf, c->readbuf_size) == 1){
             rc = data->rc;
-        else
+        }else
             rc = FAILURE;
     }
     else

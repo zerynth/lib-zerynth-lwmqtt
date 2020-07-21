@@ -16,6 +16,7 @@
  *******************************************************************************/
 
 #include "MQTTZerynth.h"
+#include "lwmqtt_debug.h"
 
 
 #define ZERYNTH_MQTT_THREAD_STACK 768
@@ -101,59 +102,36 @@ int Zerynth_read(Network* n, unsigned char* buffer, int len, int timeout_ms)
     tv.tv_sec  = timeout_ms / 1000;
     tv.tv_usec = ( timeout_ms % 1000 ) * 1000;
 
+    DEBUG2("Reading bytes %i with socket %i",len,n->my_socket);
     RELEASE_GIL();
 
     FD_ZERO( &read_fds );
-    if (n->my_socket < FD_SETSIZE) {
-        // FD_SET only for allowed sock_ids ( < FD_SETSIZE)
-        // if the id is not valid, the zsock_select is implemented in a custom way to 
-        // handle such ids 
-        // (e.g. for esp32net TLS sockets with id > 300, select is not available, but
-        // is implemented checking if data is available to read for only one socket whose id is derived
-        // from maxfdp1)
-        FD_SET(n->my_socket, &read_fds );
-    }
+    FD_SET(n->my_socket, &read_fds );
 
-    rc = zsock_select(n->my_socket + 1, &read_fds, NULL, NULL, timeout_ms == 0 ? NULL : &tv );
+    rc = gzsock_select(n->my_socket + 1, &read_fds, NULL, NULL, timeout_ms == 0 ? NULL : &tv );
 
     /* Zero fds ready means we timed out */
     if ( rc <= 0 ) {
         ACQUIRE_GIL();
+        DEBUG2("Bytes not available (%i) with socket %i",rc,n->my_socket);
         return rc;
     }
 
-    rc = zsock_recv(n->my_socket, buffer, len, 0);
-    if(rc<=0) {
-        //socket is closed! select, by definition, return 1 for a closed socket because the subsequnt read will not block (0 bytes returned)
-        //this is the condition for remotely closed socket
-        rc=ERR_CONN;
+    int rb=0;
+    while (rb<len) {
+        rc = gzsock_recv(n->my_socket, buffer+rb, len-rb, 0);
+        if(rc<=0) {
+            //socket is closed! select, by definition, return 1 for a closed socket because the subsequnt read will not block (0 bytes returned)
+            //this is the condition for remotely closed socket
+            rb=ERR_CONN;
+            break;
+        } else {
+            rb+=rc;
+        }
     }
     ACQUIRE_GIL();
-    return rc;
-
-#if 0
-    uint32_t start_millis = _systime_millis;
-    int recvLen = 0;
-    zsock_setsockopt(n->my_socket, 0, SO_RCVTIMEO, &tv, sizeof(struct timeval));
-    do
-    {
-        rc = 0;
-
-        rc = zsock_recv(n->my_socket, buffer + recvLen, len - recvLen, 0);
-        if (rc > 0)
-            recvLen += rc;
-        else if (rc < 0)
-        {
-            recvLen = rc;
-            break;
-        }
-
-    } while (recvLen < len && (_systime_millis - start_millis) < timeout_ms);
-    ACQUIRE_GIL();
-
-
-	return recvLen;
-#endif
+    DEBUG2("Read bytes %i with socket %i",rb,n->my_socket);
+    return rb;
 }
 
 
@@ -162,12 +140,13 @@ int Zerynth_write(Network* n, unsigned char* buffer, int len, int timeout_ms)
 	int sentLen = 0;
 	uint64_t start_millis = vosMillis();//_systime_millis;
 
+    DEBUG2("Sending bytes %i with socket %i",len,n->my_socket);
     RELEASE_GIL();
     do
     {
         int rc = 0;
 
-		rc = zsock_send(n->my_socket, buffer + sentLen, len - sentLen, 0);
+		rc = gzsock_send(n->my_socket, buffer + sentLen, len - sentLen, 0);
 
         if (rc > 0)
             sentLen += rc;
@@ -178,20 +157,21 @@ int Zerynth_write(Network* n, unsigned char* buffer, int len, int timeout_ms)
         }
     } while (sentLen < len && ((vosMillis() - start_millis) < timeout_ms));
     ACQUIRE_GIL();
-
-
+    DEBUG2("Sent bytes %i with socket %i",sentLen,n->my_socket);
 	return sentLen;
 }
 
 
 void Zerynth_disconnect(Network* n)
 {
-	zsock_close(n->my_socket);
+    DEBUG2("MQTT disconnecting from socket %i",n->my_socket);
+	gzsock_close(n->my_socket);
 }
 
 
 void NetworkInit(Network* n)
 {
+    DEBUG2("MQTT configured with Zerynth sockets","");
 	n->my_socket = 0;
 	n->mqttread = Zerynth_read;
 	n->mqttwrite = Zerynth_write;

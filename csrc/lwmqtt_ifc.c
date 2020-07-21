@@ -1,12 +1,13 @@
 /*
 * @Author: lorenzo
 * @Date:   2018-08-24 11:28:19
-* @Last Modified by:   a.bau
-* @Last Modified time: 2020-05-09 22:16:31
+* @Last Modified by:   andrea
+* @Last Modified time: 2020-07-09 14:48:14
 */
 
 // #define ZERYNTH_PRINTF
 #include "zerynth.h"
+#include "lwmqtt_debug.h"
 #include "MQTTClient.h"
 
 //#define printf(...) vbl_printf_stdout(__VA_ARGS__)
@@ -348,6 +349,17 @@ C_NATIVE(_mqtt_topic_match) {
     uint8_t *gelvl = gen_topic;
     int nlvl;
     int nglvl;
+
+    if (topic[0] == gen_topic[0] && topic[0]=='/'){
+        lvl++;
+        elvl++;
+        topic++;
+        gen_topic++;
+        glvl++;
+        gelvl++;
+        if(topic_len) topic_len--;
+        if(gen_topic_len) gen_topic_len--;
+    }
 
     for(i=0;i<topic_len;i++){
         // printf("topic @%i %c\n",i,topic[i]);

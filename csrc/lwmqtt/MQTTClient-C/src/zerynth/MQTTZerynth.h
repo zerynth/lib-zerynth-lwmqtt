@@ -20,7 +20,6 @@
 // #define ZERYNTH_PRINTF
 #include "zerynth.h"
 
-#define ZERYNTH_SOCKETS
 #include "zerynth_sockets.h"
 
 #include "snprintf.h"
